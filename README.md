@@ -31,7 +31,7 @@ and the code under discussion never leave your machine.
 ## Setup
 
 ```bash
-git clone https://github.com/loovishkundu/pca.git ~/dev/pca
+git clone https://github.com/loovishkundu/personal_coding_assistant.git ~/dev/pca
 cd ~/dev/pca
 uv sync
 uv run pca doctor   # verifies the server is reachable and the model is available
