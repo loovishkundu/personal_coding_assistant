@@ -7,9 +7,10 @@ the code under discussion never leave the machine.
 ## Design principles
 
 1. **Local-first.** The backend is any OpenAI-compatible local server
-   (Ollama `http://localhost:11434/v1`, LM Studio, llama.cpp `--server`,
-   vLLM). PCA speaks the standard `/chat/completions` + `/models` endpoints
-   over plain httpx — no vendor SDK, so switching runtimes is a base-URL flag.
+   (Ollama `http://localhost:11434/v1`, LM Studio, llama.cpp's
+   `llama-server`, vLLM). PCA speaks the standard `/chat/completions` +
+   `/models` endpoints over plain httpx — no vendor SDK, so switching
+   runtimes is a base-URL flag.
 2. **stdout is the answer.** Only the model's answer is written to stdout;
    all progress, warnings, and errors go to stderr. This makes PCA
    composable: `git commit -F <(pca commit-msg)` works.

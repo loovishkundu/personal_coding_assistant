@@ -1,7 +1,7 @@
 """Runtime configuration: flags win, then environment, then defaults.
 
 PCA talks to any OpenAI-compatible local server. The defaults target Ollama's
-built-in compatibility endpoint; LM Studio (:1234/v1), llama.cpp --server
+built-in compatibility endpoint; LM Studio (:1234/v1), llama-server
 (:8080/v1), and vLLM (:8000/v1) all work by pointing --base-url at them.
 """
 
