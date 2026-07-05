@@ -201,8 +201,8 @@ def _cmd_doctor(args: argparse.Namespace, settings: Settings, console: Console) 
         print(f"model:   '{settings.model}' is available — you're good")
         return EXIT_OK
     print(f"model:   '{settings.model}' is NOT available")
-    print(f"hint:    pull it (e.g. `ollama pull {settings.model}`), or pass --model / set")
-    print("         PCA_MODEL to one of the models listed above")
+    print(f"hint:    load/pull it in your local server (e.g. `ollama pull {settings.model}`")
+    print("         for Ollama), or pass --model / set PCA_MODEL to one of the models above")
     return EXIT_BACKEND
 
 

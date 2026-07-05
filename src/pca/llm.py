@@ -57,8 +57,8 @@ def _http_error(exc: httpx.HTTPStatusError, model: str) -> BackendError:
     if status == 404 and (model in detail or "model" in detail.lower()):
         return BackendError(
             f"the server rejected model '{model}': {detail or f'HTTP {status}'}",
-            hint=f"pull it first (e.g. `ollama pull {model}`) or pass --model / set PCA_MODEL "
-            "to a model `pca doctor` lists as available.",
+            hint=f"load/pull it in your local server (e.g. `ollama pull {model}` for Ollama) "
+            "or pass --model / set PCA_MODEL to a model `pca doctor` lists as available.",
         )
     return BackendError(f"the server returned HTTP {status}: {detail or exc.request.url}")
 

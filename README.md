@@ -17,15 +17,15 @@ and the code under discussion never leave your machine.
 
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/)
 - Any OpenAI-compatible local LLM server. The default configuration targets
-  [Ollama](https://ollama.com):
+  [LM Studio](https://lmstudio.ai):
 
-  ```bash
-  brew install ollama          # or the installer from ollama.com
-  ollama serve                 # if not already running as a service
-  ollama pull qwen2.5-coder:7b # the default model; any coding model works
+  ```
+  # In LM Studio: download qwen3-coder-30b-a3b-instruct-mlx (or any coding
+  # model), then Developer tab → Start Server (serves an OpenAI-compatible
+  # API on http://127.0.0.1:1234/v1 by default).
   ```
 
-  LM Studio, llama.cpp (`llama-server`), and vLLM work too — point
+  Ollama, llama.cpp (`llama-server`), and vLLM work too — point
   `--base-url` (or `PCA_BASE_URL`) at them.
 
 ## Setup
@@ -34,7 +34,7 @@ and the code under discussion never leave your machine.
 git clone https://github.com/loovishkundu/pca.git ~/dev/pca
 cd ~/dev/pca
 uv sync
-uv run pca doctor   # verifies the server is reachable and the model is pulled
+uv run pca doctor   # verifies the server is reachable and the model is available
 ```
 
 > Keep the checkout on a non-iCloud-synced path (like `~/dev`). iCloud sets
@@ -67,8 +67,8 @@ uv run pca doctor
 
 | Flag | Meaning | Default |
 | --- | --- | --- |
-| `--model` | model to use | `$PCA_MODEL`, else `qwen2.5-coder:7b` |
-| `--base-url` | OpenAI-compatible server URL | `$PCA_BASE_URL`, else `http://localhost:11434/v1` |
+| `--model` | model to use | `$PCA_MODEL`, else `qwen3-coder-30b-a3b-instruct-mlx` |
+| `--base-url` | OpenAI-compatible server URL | `$PCA_BASE_URL`, else `http://127.0.0.1:1234/v1` |
 | `--timeout` | read timeout in seconds | `300` (cold model loads are slow) |
 | `--no-stream` | print the reply only when complete | streaming on |
 
