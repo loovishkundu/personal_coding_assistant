@@ -57,6 +57,37 @@ def test_missing_model_404_names_the_model_and_the_fix():
     assert "pull" in (exc.value.hint or "")
 
 
+def test_500_mentioning_model_is_not_misclassified_as_missing():
+    # A real Ollama failure mode: OOM while loading an INSTALLED model.
+    # Telling the user to `ollama pull` it would be wrong — this must stay
+    # a generic HTTP 500. (Regression: operator precedence in _http_error.)
+    server = FakeServer(
+        fail_with=httpx.Response(
+            500, json={"error": {"message": "failed to load model into memory"}}
+        )
+    )
+    with pytest.raises(BackendError, match="HTTP 500") as exc:
+        make_llm(server).chat("s", "u", stream=False)
+    assert exc.value.hint is None
+
+
+def test_read_timeout_is_reported_as_timeout_not_unreachable():
+    class TimeoutServer(FakeServer):
+        def handler(self, request):
+            raise httpx.ReadTimeout("too slow", request=request)
+
+    with pytest.raises(BackendError, match="timed out") as exc:
+        make_llm(TimeoutServer()).chat("s", "u", stream=False)
+    assert "--timeout" in (exc.value.hint or "")
+
+
+def test_client_ignores_proxy_env():
+    # PCA only ever talks to localhost; HTTP_PROXY must never route prompts
+    # through an external proxy.
+    server = FakeServer()
+    assert make_llm(server)._client.trust_env is False
+
+
 def test_streaming_http_error_is_mapped_not_swallowed():
     server = FakeServer(fail_with=httpx.Response(500, json={"error": {"message": "boom"}}))
     with pytest.raises(BackendError, match="HTTP 500"):
@@ -83,6 +114,9 @@ def test_sse_parser_skips_noise_and_stops_at_done():
             'data: {"choices":[{"delta":{"content":"tok"}}]}',
             "data: not-json",
             'data: {"unexpected": true}',
+            "data: 42",  # valid JSON, wrong shape: TypeError, must be skipped
+            'data: {"choices":[{"delta":null}]}',  # null delta: AttributeError
+            'data: {"choices":[]}',
             "data: [DONE]",
             'data: {"choices":[{"delta":{"content":"after done"}}]}',
         ]

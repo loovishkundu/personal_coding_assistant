@@ -31,8 +31,18 @@ def _connect_error(base_url: str, exc: Exception) -> BackendError:
         f"cannot reach the local LLM server at {base_url} ({exc.__class__.__name__})",
         hint=(
             "start your local server first — e.g. `ollama serve` (Ollama), or point "
-            "--base-url / PCA_BASE_URL at LM Studio, llama.cpp --server, or vLLM. "
+            "--base-url / PCA_BASE_URL at LM Studio, llama-server, or vLLM. "
             "`pca doctor` shows what PCA can see."
+        ),
+    )
+
+
+def _timeout_error(exc: Exception) -> BackendError:
+    return BackendError(
+        f"timed out waiting for the server ({exc.__class__.__name__})",
+        hint=(
+            "cold model loads and long generations can be slow — raise --timeout, "
+            "or run `pca doctor` to check the server."
         ),
     )
 
@@ -44,7 +54,7 @@ def _http_error(exc: httpx.HTTPStatusError, model: str) -> BackendError:
         detail = exc.response.json().get("error", {}).get("message", "")
     except Exception:  # non-JSON error body; the status alone is enough
         detail = exc.response.text[:200]
-    if status == 404 and model in detail or "model" in detail.lower():
+    if status == 404 and (model in detail or "model" in detail.lower()):
         return BackendError(
             f"the server rejected model '{model}': {detail or f'HTTP {status}'}",
             hint=f"pull it first (e.g. `ollama pull {model}`) or pass --model / set PCA_MODEL "
@@ -68,7 +78,11 @@ class LLM:
         # Connect fast-fails when the server is down; read stays generous
         # because a cold model load can take a while before the first token.
         timeout = httpx.Timeout(connect=5.0, read=timeout_s, write=30.0, pool=5.0)
-        self._client = httpx.Client(base_url=self.base_url, timeout=timeout, transport=transport)
+        # trust_env=False: this client only ever talks to a local server —
+        # HTTP_PROXY/ALL_PROXY must not route prompts through a corp proxy.
+        self._client = httpx.Client(
+            base_url=self.base_url, timeout=timeout, transport=transport, trust_env=False
+        )
 
     def close(self) -> None:
         self._client.close()
@@ -104,6 +118,8 @@ class LLM:
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise _http_error(exc, self.model) from exc
+        except httpx.TimeoutException as exc:
+            raise _timeout_error(exc) from exc
         except httpx.TransportError as exc:
             raise _connect_error(self.base_url, exc) from exc
         try:
@@ -132,6 +148,8 @@ class LLM:
                     parts.append(token)
                     if on_token is not None:
                         on_token(token)
+        except httpx.TimeoutException as exc:
+            raise _timeout_error(exc) from exc
         except httpx.TransportError as exc:
             raise _connect_error(self.base_url, exc) from exc
         return "".join(parts)
@@ -144,6 +162,8 @@ class LLM:
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise BackendError(f"the server returned HTTP {exc.response.status_code}") from exc
+        except httpx.TimeoutException as exc:
+            raise _timeout_error(exc) from exc
         except httpx.TransportError as exc:
             raise _connect_error(self.base_url, exc) from exc
         try:
@@ -167,9 +187,10 @@ def _iter_sse_tokens(lines: Iterator[str]) -> Iterator[str]:
         if payload == "[DONE]":
             return
         try:
-            delta = json.loads(payload)["choices"][0].get("delta", {})
-        except (ValueError, KeyError, IndexError):
+            token = json.loads(payload)["choices"][0].get("delta", {}).get("content")
+        except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+            # Covers non-dict JSON (`data: 42`) and null deltas too — any
+            # shape surprise is one skipped chunk, never a dead stream.
             continue
-        token = delta.get("content")
         if token:
             yield token
