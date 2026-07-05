@@ -1,0 +1,43 @@
+[project]
+name = "pca"
+version = "0.1.0"
+description = "Personal coding assistant backed by a locally-served LLM (Ollama, LM Studio, llama.cpp, vLLM)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "rich>=13.7",
+]
+
+[project.scripts]
+pca = "pca:main"
+
+[dependency-groups]
+dev = [
+    "black>=24.4",
+    "isort>=5.13",
+    "pytest>=8.2",
+    "ruff>=0.5",
+]
+
+[build-system]
+requires = ["uv_build>=0.6.0,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
