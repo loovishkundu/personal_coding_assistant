@@ -50,9 +50,18 @@ def test_bad_line_ranges_are_rejected(tmp_path: Path):
 def test_oversized_file_is_truncated_and_disclosed(tmp_path: Path):
     f = tmp_path / "big.txt"
     f.write_text("x" * (MAX_FILE_BYTES + 100))
-    block = read_file_block(f)
-    assert "(truncated" in block
+    warnings: list[str] = []
+    block = read_file_block(f, warn=warnings.append)
+    assert "(truncated" in block  # the model is told
+    assert warnings and "sees only the beginning" in warnings[0]  # the user is told
     assert len(block) < MAX_FILE_BYTES + 500
+
+
+def test_binary_file_is_rejected_not_mangled(tmp_path: Path):
+    f = tmp_path / "blob.bin"
+    f.write_bytes(b"\x00\x01\x02 not text")
+    with pytest.raises(ContextError, match="binary"):
+        read_file_block(f)
 
 
 def test_multiple_files_join(tmp_path: Path):
@@ -97,6 +106,22 @@ def test_staged_diff_returns_the_staged_change(tmp_path: Path):
     _git(tmp_path, "add", "f.txt")
     diff = staged_diff(cwd=tmp_path)
     assert "-old" in diff and "+new" in diff
+
+
+def test_staged_diff_ignores_external_diff_tools(tmp_path: Path):
+    # A configured diff.external (difftastic etc.) must not replace the
+    # unified diff the model needs — staged_diff passes --no-ext-diff.
+    _git(tmp_path, "init", "-b", "main")
+    f = tmp_path / "f.txt"
+    f.write_text("old\n")
+    _git(tmp_path, "add", "f.txt")
+    _git(tmp_path, "commit", "-m", "init")
+    _git(tmp_path, "config", "diff.external", "echo EXTERNAL-TOOL")
+    f.write_text("new\n")
+    _git(tmp_path, "add", "f.txt")
+    diff = staged_diff(cwd=tmp_path)
+    assert "EXTERNAL-TOOL" not in diff
+    assert "+new" in diff
 
 
 def test_empty_index_raises_nothing_staged(tmp_path: Path):

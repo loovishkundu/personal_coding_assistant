@@ -7,12 +7,16 @@ functions return, so context bugs are testable without any LLM.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
-# Guard against feeding a local model more than it can attend to; callers
-# surface the truncation instead of silently clipping.
+# Guard against feeding a local model more than it can attend to. Truncation
+# is disclosed twice: inline in the prompt block (so the model knows) and via
+# the `warn` callback (so the user knows).
 MAX_FILE_BYTES = 200_000
 MAX_DIFF_BYTES = 200_000
+
+WarnFn = Callable[[str], None]
 
 _LANG_BY_SUFFIX = {
     ".py": "python",
@@ -48,14 +52,19 @@ class ContextError(Exception):
     """A context source is missing or unusable (bad path, empty index, ...)."""
 
 
-def read_file_block(path: Path, lines: tuple[int, int] | None = None) -> str:
+def read_file_block(
+    path: Path, lines: tuple[int, int] | None = None, warn: WarnFn | None = None
+) -> str:
     """Return one file (or a 1-indexed inclusive line range) as a fenced block."""
     if not path.is_file():
         raise ContextError(f"no such file: {path}")
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        data = path.read_bytes()
     except OSError as exc:
         raise ContextError(f"cannot read {path}: {exc}") from exc
+    if b"\x00" in data[:8192]:
+        raise ContextError(f"{path} looks like a binary file — pca reads source, not binaries")
+    text = data.decode("utf-8", errors="replace")
 
     label = str(path)
     if lines is not None:
@@ -77,11 +86,16 @@ def read_file_block(path: Path, lines: tuple[int, int] | None = None) -> str:
     block = f"### {label}\n```{lang}\n{text}\n```"
     if truncated:
         block += f"\n(truncated at {MAX_FILE_BYTES // 1000}KB)"
+        if warn is not None:
+            warn(
+                f"{path} exceeds {MAX_FILE_BYTES // 1000}KB — the model sees only the "
+                "beginning; pass --lines to pick the part that matters"
+            )
     return block
 
 
-def read_files_block(paths: list[Path]) -> str:
-    return "\n\n".join(read_file_block(p) for p in paths)
+def read_files_block(paths: list[Path], warn: WarnFn | None = None) -> str:
+    return "\n\n".join(read_file_block(p, warn=warn) for p in paths)
 
 
 def parse_line_range(raw: str) -> tuple[int, int]:
@@ -97,11 +111,16 @@ def parse_line_range(raw: str) -> tuple[int, int]:
     return start, end
 
 
-def staged_diff(cwd: Path | None = None) -> str:
-    """Return the staged diff, or raise ContextError when there is nothing to do."""
+def staged_diff(cwd: Path | None = None, warn: WarnFn | None = None) -> str:
+    """Return the staged diff, or raise ContextError when there is nothing to do.
+
+    --no-ext-diff keeps the output a plain unified diff even when the user
+    has diff.external (difftastic etc.) configured — external tools emit
+    human-oriented, often colored output the model would misread.
+    """
     try:
         proc = subprocess.run(
-            ["git", "diff", "--cached", "--no-color"],
+            ["git", "diff", "--cached", "--no-color", "--no-ext-diff"],
             capture_output=True,
             text=True,
             cwd=cwd,
@@ -117,4 +136,9 @@ def staged_diff(cwd: Path | None = None) -> str:
     if len(diff.encode()) > MAX_DIFF_BYTES:
         diff = diff.encode()[:MAX_DIFF_BYTES].decode(errors="replace")
         diff += f"\n(diff truncated at {MAX_DIFF_BYTES // 1000}KB)"
+        if warn is not None:
+            warn(
+                f"staged diff exceeds {MAX_DIFF_BYTES // 1000}KB — the model sees only "
+                "the beginning; consider staging less at once"
+            )
     return diff
