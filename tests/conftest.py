@@ -71,21 +71,31 @@ class FakeServer:
 
 
 class FakeLLM:
-    """Drop-in for cli.LLM: canned reply, records what it was asked."""
+    """Drop-in for cli.LLM: canned reply, records ctor args and every call."""
 
     reply = "canned reply"
     models = ["qwen2.5-coder:7b"]
     calls: list[dict] = []
+    instances: list[FakeLLM] = []
+    raise_on_chat: Exception | None = None
 
     def __init__(self, base_url, model, timeout_s, transport=None):
         self.base_url = base_url
         self.model = model
+        self.timeout_s = timeout_s
+        FakeLLM.instances.append(self)
 
     def chat(self, system, user, stream=True, on_token=None):
         FakeLLM.calls.append({"system": system, "user": user, "stream": stream})
+        if FakeLLM.raise_on_chat is not None:
+            raise FakeLLM.raise_on_chat
         if stream and on_token is not None:
-            for chunk in self.reply.split(" "):
-                on_token(chunk + " ")
+            # Emit in two exact halves so tests can assert byte-identical
+            # stdout reassembly.
+            mid = len(self.reply) // 2
+            for chunk in (self.reply[:mid], self.reply[mid:]):
+                if chunk:
+                    on_token(chunk)
         return self.reply
 
     def list_models(self):
@@ -98,8 +108,10 @@ class FakeLLM:
 @pytest.fixture(autouse=True)
 def _reset_fake_llm():
     FakeLLM.calls = []
+    FakeLLM.instances = []
     FakeLLM.reply = "canned reply"
     FakeLLM.models = ["qwen2.5-coder:7b"]
+    FakeLLM.raise_on_chat = None
     yield
 
 

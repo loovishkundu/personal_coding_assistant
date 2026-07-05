@@ -78,8 +78,11 @@ uv run pca doctor
 ### Output contract
 
 stdout carries **only the answer** (or `doctor`'s report); all progress and
-errors go to stderr. That is what makes `git commit -F <(pca commit-msg)`
-safe.
+errors go to stderr. When stdout is a pipe rather than a terminal, PCA
+buffers the reply and writes it only after it completed successfully — a
+mid-stream backend failure leaves the pipe **empty** (exit 3), never a
+truncated message. That is what makes `git commit -F <(pca commit-msg)`
+safe: git either gets the whole message or nothing.
 
 ### Exit codes
 

@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from rich.console import Console
+from rich.markup import escape
 
 from .config import DEFAULT_BASE_URL, DEFAULT_MODEL, Settings
 from .context import (
@@ -108,19 +109,30 @@ def _settings(args: argparse.Namespace) -> Settings:
     )
 
 
+def _stdout_is_tty() -> bool:
+    return sys.stdout.isatty()
+
+
 def _run_chat(settings: Settings, system: str, user: str, console: Console) -> int:
-    console.print(f"[dim]pca · {settings.model} @ {settings.base_url}[/dim]")
+    console.print(f"[dim]pca · {escape(settings.model)} @ {escape(settings.base_url)}[/dim]")
     llm = LLM(settings.base_url, settings.model, settings.timeout_s)
+    # Stream tokens live only when a human is watching. When stdout is a pipe
+    # (`git commit -F <(pca commit-msg)`), buffer and write only after the
+    # reply completed: a mid-stream failure must leave the pipe EMPTY — the
+    # pipe consumer cannot see pca's exit code, so a truncated message would
+    # get used as if it were the real thing.
+    live = settings.stream and _stdout_is_tty()
     try:
-        if settings.stream:
+        if live:
             reply = llm.chat(
                 system, user, stream=True, on_token=lambda t: print(t, end="", flush=True)
             )
             if reply and not reply.endswith("\n"):
                 print()
         else:
-            reply = llm.chat(system, user, stream=False)
-            print(reply.rstrip("\n"))
+            reply = llm.chat(system, user, stream=settings.stream)
+            if reply.strip():
+                print(reply.rstrip("\n"))
     finally:
         llm.close()
     if not reply.strip():
@@ -128,31 +140,36 @@ def _run_chat(settings: Settings, system: str, user: str, console: Console) -> i
     return EXIT_OK
 
 
+def _warn_fn(console: Console):
+    return lambda message: console.print(f"[yellow]warning:[/yellow] {escape(message)}")
+
+
 def _cmd_ask(args: argparse.Namespace, settings: Settings, console: Console) -> int:
     user = args.question
     if args.files:
-        user += "\n\nRelevant files:\n\n" + read_files_block(args.files)
+        user += "\n\nRelevant files:\n\n" + read_files_block(args.files, warn=_warn_fn(console))
     return _run_chat(settings, ASK_SYSTEM, user, console)
 
 
 def _cmd_explain(args: argparse.Namespace, settings: Settings, console: Console) -> int:
     lines = parse_line_range(args.lines) if args.lines else None
-    user = "Explain this code.\n\n" + read_file_block(args.path, lines)
+    user = "Explain this code.\n\n" + read_file_block(args.path, lines, warn=_warn_fn(console))
     return _run_chat(settings, EXPLAIN_SYSTEM, user, console)
 
 
 def _cmd_review(args: argparse.Namespace, settings: Settings, console: Console) -> int:
+    warn = _warn_fn(console)
     sections: list[str] = []
     if args.staged:
-        sections.append("### staged diff\n```diff\n" + staged_diff() + "\n```")
+        sections.append("### staged diff\n```diff\n" + staged_diff(warn=warn) + "\n```")
     if args.paths:
-        sections.append(read_files_block(args.paths))
+        sections.append(read_files_block(args.paths, warn=warn))
     user = "Review the following.\n\n" + "\n\n".join(sections)
     return _run_chat(settings, REVIEW_SYSTEM, user, console)
 
 
 def _cmd_commit_msg(args: argparse.Namespace, settings: Settings, console: Console) -> int:
-    user = "Staged diff:\n\n```diff\n" + staged_diff() + "\n```"
+    user = "Staged diff:\n\n```diff\n" + staged_diff(warn=_warn_fn(console)) + "\n```"
     return _run_chat(settings, COMMIT_MSG_SYSTEM, user, console)
 
 
@@ -176,8 +193,10 @@ def _cmd_doctor(args: argparse.Namespace, settings: Settings, console: Console) 
             print(f"  - {m}")
     else:
         print("models:  none installed")
-    # Tag-tolerant match: `ollama pull foo` registers "foo:latest".
-    names = {m for m in models} | {m.split(":")[0] for m in models}
+    # Tag tolerance covers exactly Ollama's default: `ollama pull foo`
+    # registers "foo:latest", which a bare "foo" resolves to. Other tags do
+    # NOT resolve from a bare name, so they must not satisfy the check.
+    names = set(models) | {m.removesuffix(":latest") for m in models if m.endswith(":latest")}
     if settings.model in names:
         print(f"model:   '{settings.model}' is available — you're good")
         return EXIT_OK
@@ -208,12 +227,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return _COMMANDS[args.command](args, settings, console)
     except ContextError as exc:
-        console.print(f"[bold red]error:[/bold red] {exc}")
+        # escape(): error text carries untrusted content (git stderr, paths)
+        # that Rich would otherwise parse as markup — and crash on.
+        console.print(f"[bold red]error:[/bold red] {escape(str(exc))}")
         return EXIT_NO_INPUT
     except BackendError as exc:
-        console.print(f"[bold red]error:[/bold red] {exc}")
+        console.print(f"[bold red]error:[/bold red] {escape(str(exc))}")
         if exc.hint:
-            console.print(f"[yellow]hint:[/yellow] {exc.hint}")
+            console.print(f"[yellow]hint:[/yellow] {escape(exc.hint)}")
         return EXIT_BACKEND
     except KeyboardInterrupt:
         console.print("\nInterrupted.")
